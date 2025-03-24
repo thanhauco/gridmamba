@@ -2,7 +2,11 @@
 
 The recurrence h_t = exp(dt_t * A) * h_{t-1} + dt_t * B_t * u_t is input-dependent
 ("selective"): dt, B and C are all projected from the input at every step.
-The scan is a plain sequential loop over time for now.
+Two scan backends compute the same thing:
+
+* ``sequential_scan``: a reference O(L) Python loop.
+* ``parallel_scan``: a Hillis-Steele associative scan with O(log L) depth, using
+  the operator (a1, b1) . (a2, b2) = (a1 * a2, a2 * b1 + b2).
 """
 
 from __future__ import annotations
@@ -24,6 +28,17 @@ def sequential_scan(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
     return torch.stack(out, dim=1)
 
 
+def parallel_scan(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+    """Same result as ``sequential_scan`` in ceil(log2 L) vectorized steps."""
+    length = b.shape[1]
+    offset = 1
+    while offset < length:
+        b = torch.cat([b[:, :offset], a[:, offset:] * b[:, :-offset] + b[:, offset:]], dim=1)
+        a = torch.cat([a[:, :offset], a[:, offset:] * a[:, :-offset]], dim=1)
+        offset *= 2
+    return b
+
+
 def selective_scan(
     u: torch.Tensor,
     delta: torch.Tensor,
@@ -31,6 +46,7 @@ def selective_scan(
     B: torch.Tensor,
     C: torch.Tensor,
     D: torch.Tensor,
+    parallel: bool = True,
 ) -> torch.Tensor:
     """Discretize with zero-order hold on A (Euler on B) and run the scan.
 
@@ -38,7 +54,7 @@ def selective_scan(
     """
     dA = torch.exp(delta.unsqueeze(-1) * A)  # (batch, L, E, N)
     dBu = delta.unsqueeze(-1) * B.unsqueeze(2) * u.unsqueeze(-1)
-    h = sequential_scan(dA, dBu)
+    h = (parallel_scan if parallel else sequential_scan)(dA, dBu)
     y = (h * C.unsqueeze(2)).sum(-1)
     return y + u * D
 
@@ -52,11 +68,13 @@ class MambaBlock(nn.Module):
         expand: int = 2,
         dt_min: float = 1e-3,
         dt_max: float = 1e-1,
-        ):
+        parallel: bool = True,
+    ):
         super().__init__()
         d_inner = expand * d_model
         self.d_state = d_state
         self.dt_rank = math.ceil(d_model / 16)
+        self.parallel = parallel
 
         self.in_proj = nn.Linear(d_model, 2 * d_inner, bias=False)
         self.conv1d = nn.Conv1d(d_inner, d_inner, d_conv, groups=d_inner, padding=d_conv - 1)
@@ -81,5 +99,5 @@ class MambaBlock(nn.Module):
         dt, B, C = self.x_proj(u).split([self.dt_rank, self.d_state, self.d_state], dim=-1)
         delta = F.softplus(self.dt_proj(dt))
         A = -torch.exp(self.A_log)
-        y = selective_scan(u, delta, A, B, C, self.D)
+        y = selective_scan(u, delta, A, B, C, self.D, parallel=self.parallel)
         return self.out_proj(y * F.silu(z))
