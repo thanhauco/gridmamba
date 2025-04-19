@@ -1,9 +1,12 @@
 """Sparse top-k Mixture-of-Experts feed-forward layer.
 
 Each token is routed to its ``top_k`` highest-probability experts, and their
-outputs are combined with renormalized gate weights. A Switch-style
-load-balancing loss, E * sum_e f_e * P_e, keeps routing healthy. Here f_e is
-the fraction of routed slots and P_e the mean router probability of expert e.
+outputs are combined with renormalized gate weights. Two auxiliary losses
+keep routing healthy:
+
+* Switch-style load balancing: E * sum_e f_e * P_e, where f_e is the fraction
+  of routed slots and P_e the mean router probability of expert e.
+* ST-MoE router z-loss: mean(logsumexp(logits)^2), which keeps logits small.
 """
 
 from __future__ import annotations
@@ -63,6 +66,7 @@ class SparseMoE(nn.Module):
         counts = F.one_hot(idx, self.n_experts).sum(dim=(0, 1)).float()
         frac = counts / counts.sum()
         balance = self.n_experts * (frac * probs.mean(dim=0)).sum()
+        z_loss = torch.logsumexp(logits, dim=-1).pow(2).mean()
         if not self.training:
             self.usage += counts.detach()
-        return out.view_as(x), {"balance": balance}
+        return out.view_as(x), {"balance": balance, "z": z_loss}
