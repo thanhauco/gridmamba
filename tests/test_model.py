@@ -1,6 +1,6 @@
 import torch
 
-from gridmamba.model import GridMamba, ModelConfig
+from gridmamba.model import GridMamba, ModelConfig, monotone_quantiles
 from gridmamba.moe import SparseMoE
 
 
@@ -20,6 +20,11 @@ def test_moe_tracks_usage_in_eval():
     moe = SparseMoE(d_model=8, n_experts=3, top_k=2).eval()
     moe(torch.randn(2, 5, 8))
     assert moe.usage.sum().item() == 2 * 5 * 2
+
+
+def test_monotone_quantiles_never_cross():
+    q = monotone_quantiles(torch.randn(64, 24, 5) * 10)
+    assert (q.diff(dim=-1) > 0).all()
 
 
 def test_forward_shapes_and_scale_equivariance():

@@ -54,16 +54,17 @@ class HybridLayer(nn.Module):
         return h + self.drop(moe_out), aux
 
 
-def monotone_quantiles(raw: torch.Tensor) -> torch.Tensor:
+def monotone_quantiles(raw: torch.Tensor, min_gap: float = 1e-4) -> torch.Tensor:
     """Map unconstrained outputs to sorted quantiles around the median.
 
     The center channel is the median. Other quantiles are offset from it by
-    cumulative softplus increments, so the quantiles can never cross.
+    cumulative softplus increments, so the quantiles can never cross. ``min_gap``
+    keeps them strictly ordered even where softplus underflows to zero.
     """
     m = raw.shape[-1] // 2
     mid = raw[..., m : m + 1]
-    up = mid + torch.cumsum(F.softplus(raw[..., m + 1 :]), dim=-1)
-    down = mid - torch.cumsum(F.softplus(raw[..., :m].flip(-1)), dim=-1).flip(-1)
+    up = mid + torch.cumsum(F.softplus(raw[..., m + 1 :]) + min_gap, dim=-1)
+    down = mid - torch.cumsum(F.softplus(raw[..., :m].flip(-1)) + min_gap, dim=-1).flip(-1)
     return torch.cat([down, mid, up], dim=-1)
 
 
