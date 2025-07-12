@@ -1,5 +1,6 @@
 import numpy as np
 
+from gridmamba.baselines import daily_naive, weekly_naive
 from gridmamba.data import DataConfig, build_features, generate, make_splits, make_windows
 
 
@@ -26,3 +27,5 @@ def test_windows_align_context_and_targets():
     r, t0 = win.region[i], win.origin[i]
     np.testing.assert_allclose(win.Y[i], data["load"][r, t0 : t0 + 24], rtol=1e-6)
     np.testing.assert_allclose(win.X[i, -1, 0], data["load"][r, t0 - 1], rtol=1e-6)
+    np.testing.assert_allclose(daily_naive(win.X, 24)[i], data["load"][r, t0 - 24 : t0], rtol=1e-6)
+    np.testing.assert_allclose(weekly_naive(win.X, 24)[i], data["load"][r, t0 - 168 : t0 - 144], rtol=1e-6)
