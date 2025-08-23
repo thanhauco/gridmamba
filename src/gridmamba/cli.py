@@ -15,6 +15,7 @@ from gridmamba.conformal import CQR, SplitConformal, adaptive_conformal, cqr_sco
 from gridmamba.data import FEATURES, DataConfig, build_features, generate, make_splits, make_windows
 from gridmamba.metrics import interval_report, mae, rmse
 from gridmamba.model import GridMamba, ModelConfig
+from gridmamba.plots import make_report
 from gridmamba.train import TrainConfig, fit, predict
 
 
@@ -120,9 +121,24 @@ def main(argv: list[str] | None = None) -> dict:
     results["aci_final_alpha"] = alpha_path[-1].tolist()
 
     _print_tables(results)
+    post = np.flatnonzero(segments["post_shift"])
+    example = post[len(post) // 2] if len(post) else len(test) - 1
+    make_report(
+        args.out / "report.png",
+        X=test.X,
+        Y=test.Y,
+        origin=test.origin,
+        median=med_t,
+        bands={k: bands[k] for k in ("raw quantiles", "CQR", "ACI")},
+        shift_idx=shift,
+        alpha=alpha,
+        horizon_mae={k: np.abs(v - test.Y).mean(axis=0) for k, v in point.items()},
+        expert_usage=usage,
+        example=example,
+    )
     (args.out / "metrics.json").write_text(json.dumps(results, indent=2))
     torch.save({"config": model_cfg.__dict__, "state_dict": model.state_dict()}, args.out / "gridmamba.pt")
-    print(f"\nwrote {args.out / 'metrics.json'}, {args.out / 'gridmamba.pt'}")
+    print(f"\nwrote {args.out / 'metrics.json'}, {args.out / 'report.png'}, {args.out / 'gridmamba.pt'}")
     return results
 
 
