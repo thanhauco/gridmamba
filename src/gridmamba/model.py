@@ -20,8 +20,8 @@ class ModelConfig:
     quantiles: tuple[float, ...] = (0.05, 0.25, 0.5, 0.75, 0.95)
     d_model: int = 64
     n_layers: int = 3
-    patch_len: int = 6
-    d_state: int = 16
+    patch_len: int = 12
+    d_state: int = 8
     n_experts: int = 6
     top_k: int = 2
     dropout: float = 0.1

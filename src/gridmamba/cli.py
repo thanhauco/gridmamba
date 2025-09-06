@@ -32,7 +32,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--aci-gamma", type=float, default=0.03)
     p.add_argument("--train-stride", type=int, default=4)
     p.add_argument("--seed", type=int, default=0)
-    p.add_argument("--device", default="cpu")
+    p.add_argument("--device", default="auto", help="auto, cpu, cuda or mps")
     p.add_argument("--out", type=Path, default=Path("outputs"))
     return p.parse_args(argv)
 
@@ -43,8 +43,19 @@ def seed_everything(seed: int) -> None:
     torch.manual_seed(seed)
 
 
-def main(argv: list[str] | None = None) -> dict:
+def resolve_device(name: str) -> str:
+    if name != "auto":
+        return name
+    if torch.cuda.is_available():
+        return "cuda"
+    if torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
+
+def run(argv: list[str] | None = None) -> dict:
     args = parse_args(argv)
+    args.device = resolve_device(args.device)
     seed_everything(args.seed)
     args.out.mkdir(parents=True, exist_ok=True)
     context, horizon = 168, 24
@@ -74,7 +85,7 @@ def main(argv: list[str] | None = None) -> dict:
         top_k=args.top_k,
     )
     model = GridMamba(model_cfg)
-    print(f"parameters: {sum(p.numel() for p in model.parameters()):,}")
+    print(f"parameters: {sum(p.numel() for p in model.parameters()):,} | device: {args.device}")
     train_cfg = TrainConfig(epochs=args.epochs, batch_size=args.batch_size, lr=args.lr, device=args.device)
     history = fit(model, train, val, train_cfg, seed=args.seed)
 
@@ -140,6 +151,10 @@ def main(argv: list[str] | None = None) -> dict:
     torch.save({"config": model_cfg.__dict__, "state_dict": model.state_dict()}, args.out / "gridmamba.pt")
     print(f"\nwrote {args.out / 'metrics.json'}, {args.out / 'report.png'}, {args.out / 'gridmamba.pt'}")
     return results
+
+
+def main() -> None:
+    run()
 
 
 def _print_tables(results: dict) -> None:
